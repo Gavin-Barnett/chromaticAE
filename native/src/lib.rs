@@ -30,6 +30,12 @@ enum Params {
     BlueColour,
     BlueSoftness,
     BlueEnd,
+    // Append enum variants to preserve the persisted IDs of every 2.0 control.
+    BlurDimensions,
+    RedDimensions,
+    GreenDimensions,
+    BlueDimensions,
+    ExpandBounds,
 }
 #[derive(Default)]
 struct Plugin;
@@ -72,6 +78,7 @@ fn settings(params: &ae::Parameters<Params>, data: InData) -> Result<Settings, E
     let softness = scalar(params, Params::Softness)?;
     let sx = f32::from(data.downsample_x());
     let sy = f32::from(data.downsample_y());
+    let dimensions = params.get(Params::BlurDimensions)?.as_popup()?.value();
     let mut channels = [Channel {
         offset: [0.0; 2],
         colour: [0.0; 3],
@@ -104,13 +111,28 @@ fn settings(params: &ae::Parameters<Params>, data: InData) -> Result<Settings, E
         let distance = scalar(params, k[0])?;
         let col = params.get(k[3])?.as_color()?.float_value()?;
         let blur = (softness + scalar(params, k[4])?).max(0.0);
+        let dimension_key = [
+            Params::RedDimensions,
+            Params::GreenDimensions,
+            Params::BlueDimensions,
+        ][i];
+        let channel_dimensions = params.get(dimension_key)?.as_popup()?.value();
+        let mode = if channel_dimensions == 1 {
+            dimensions
+        } else {
+            channel_dimensions - 1
+        };
+        // 1 = both, 2 = horizontal, 3 = vertical.
         channels[i] = Channel {
             offset: [
                 (distance * angle.cos() + scalar(params, k[1])?) * amount * sx,
                 (distance * angle.sin() + scalar(params, k[2])?) * amount * sy,
             ],
             colour: [col.red, col.green, col.blue],
-            sigma: [blur * sx, blur * sy],
+            sigma: [
+                if mode == 3 { 0.0 } else { blur * sx },
+                if mode == 2 { 0.0 } else { blur * sy },
+            ],
         };
     }
     Ok(Settings {
@@ -163,6 +185,7 @@ fn render(
     output: &mut ae::Layer,
     data: InData,
     params: &ae::Parameters<Params>,
+    legacy: bool,
 ) -> Result<(), Error> {
     let s = settings(params, data)?;
     let depth = input.bit_depth();
@@ -175,7 +198,12 @@ fn render(
     let pixels = engine::render(
         &source,
         (output.width(), output.height()),
-        [(b.h - a.h) as f32, (b.v - a.v) as f32],
+        if legacy {
+            let o = data.output_origin();
+            [-(o.h as f32), -(o.v as f32)]
+        } else {
+            [(b.h - a.h) as f32, (b.v - a.v) as f32]
+        },
         &s,
         || data.interact().abort().is_err(),
     )
@@ -277,10 +305,27 @@ impl AdobePluginGlobal for Plugin {
             200.0,
             false,
         )?;
+        params.add(
+            Params::BlurDimensions,
+            "Blur Dimensions",
+            ae::PopupDef::setup(|f| {
+                f.set_options(&["Horizontal and Vertical", "Horizontal", "Vertical"]);
+                f.set_default(1);
+                f.set_value(1);
+            }),
+        )?;
         slider(params, Params::Mix, "Mix", 100.0, 0.0, 100.0, true)?;
         params.add(
             Params::Repeat,
             "Repeat Edge Pixels",
+            ae::CheckBoxDef::setup(|f| {
+                f.set_default(true);
+                f.set_value(true);
+            }),
+        )?;
+        params.add(
+            Params::ExpandBounds,
+            "Expand Layer Bounds",
             ae::CheckBoxDef::setup(|f| {
                 f.set_default(true);
                 f.set_value(true);
@@ -390,6 +435,25 @@ impl AdobePluginGlobal for Plugin {
                     0.0,
                     200.0,
                     false,
+                )?;
+                let dimension_key = match start {
+                    Params::Red => Params::RedDimensions,
+                    Params::Green => Params::GreenDimensions,
+                    _ => Params::BlueDimensions,
+                };
+                params.add(
+                    dimension_key,
+                    &format!("{name} Blur Dimensions"),
+                    ae::PopupDef::setup(|f| {
+                        f.set_options(&[
+                            "Use Master",
+                            "Horizontal and Vertical",
+                            "Horizontal",
+                            "Vertical",
+                        ]);
+                        f.set_default(1);
+                        f.set_value(1);
+                    }),
                 )
             })?;
         }
@@ -403,25 +467,44 @@ impl AdobePluginGlobal for Plugin {
         params: &mut ae::Parameters<Params>,
     ) -> Result<(), Error> {
         match cmd {
-            ae::Command::About=>out_data.set_return_msg("Chromatic AE 2.0\rRGB split, recolouring and edge softness.\rSingle native effect for footage and adjustment layers."),
-            ae::Command::Render{in_layer,mut out_layer}=>render(&in_layer,&mut out_layer,in_data,params)?,
-            ae::Command::SmartPreRender{mut extra}=>{
-                // Request the complete source so repeats, offsets and blur are independent
-                // of the viewer's region of interest and neighbouring render tiles.
+            ae::Command::About => out_data.set_return_msg("Chromatic AE 2.1\rRGB split, recolouring and directional edge softness.\rExpanded output for footage and adjustment layers."),
+            ae::Command::FrameSetup {in_layer,..} => {
+                let pad=if params.get(Params::ExpandBounds)?.as_checkbox()?.value() {
+                    engine::expansion(&settings(params,in_data)?)
+                } else {[0;4]};
+                out_data.set_width((in_layer.width() as i32+pad[0]+pad[2]) as u32);
+                out_data.set_height((in_layer.height() as i32+pad[1]+pad[3]) as u32);
+                out_data.set_origin(ae::Point{h:pad[0],v:pad[1]});
+            },
+            ae::Command::Render {in_layer,mut out_layer} => render(&in_layer,&mut out_layer,in_data,params,true)?,
+            ae::Command::SmartPreRender {mut extra} => {
                 let original=extra.output_request();
                 let mut request=original;
                 request.rect.left=-30000;request.rect.top=-30000;
                 request.rect.right=30000;request.rect.bottom=30000;
                 let result=extra.callbacks().checkout_layer(0,0,&request,in_data.current_time(),in_data.time_step(),in_data.time_scale())?;
-                let bounds=result.max_result_rect;
-                extra.set_max_result_rect(bounds.into());
-                extra.set_result_rect(ae::Rect{left:original.rect.left.max(bounds.left),top:original.rect.top.max(bounds.top),right:original.rect.right.min(bounds.right),bottom:original.rect.bottom.min(bounds.bottom)});
+                let pad=if params.get(Params::ExpandBounds)?.as_checkbox()?.value() {
+                    engine::expansion(&settings(params,in_data)?)
+                } else {[0;4]};
+                let b=result.max_result_rect;
+                let bounds=if b.right<=b.left || b.bottom<=b.top {
+                    ae::Rect{left:0,top:0,right:0,bottom:0}
+                } else {
+                    ae::Rect{left:b.left-pad[0],top:b.top-pad[1],right:b.right+pad[2],bottom:b.bottom+pad[3]}
+                };
+                extra.set_max_result_rect(bounds);
+                let r=ae::Rect{left:original.rect.left.max(bounds.left),top:original.rect.top.max(bounds.top),right:original.rect.right.min(bounds.right),bottom:original.rect.bottom.min(bounds.bottom)};
+                // Empty requests are valid bounds-only queries. Never return inverted rectangles.
+                extra.set_result_rect(if r.right>r.left && r.bottom>r.top {r} else {ae::Rect{left:0,top:0,right:0,bottom:0}});
             },
-            ae::Command::SmartRender{extra}=>{
+            ae::Command::SmartRender {extra} => {
                 let cb=extra.callbacks();
                 let input=cb.checkout_layer_pixels(0)?;
-                let outcome:Result<(),Error>=(||{
-                    if let (Some(input),Some(mut output))=(input.as_ref(),cb.checkout_output()?){render(input,&mut output,in_data,params)?;}
+                let outcome:Result<(),Error>=(|| {
+                    if let Some(mut output)=cb.checkout_output()? {
+                        if let Some(input)=input.as_ref() {render(input,&mut output,in_data,params,false)?;}
+                        else {output.buffer_mut().fill(0);}
+                    }
                     Ok(())
                 })();
                 let checkin=cb.checkin_layer_pixels(0);

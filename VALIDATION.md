@@ -1,37 +1,44 @@
-# Native effect validation - 2.0.0
+# Native effect validation - 2.1.0
 
-Tested on Windows x64 with Adobe After Effects 2026, version **26.5x89**, on 12 October 2026.
+Tested on Windows x64 on 12 October 2026.
 
-- **11/11 Rust kernel tests passed.** Independent signed and fractional offsets, channel recolouring, HDR values, premultiplied filtering, blur energy/symmetry, repeated boundaries, mix bypass, cropped output origins, and cancellation.
-- **27/27 AE integration checks passed.** The actual `.aex` was loaded by a fresh AE process. A composition with three visual layers was processed by one native effect on one adjustment layer.
-- **A real 960 x 540 frame rendered successfully using aerender** from the saved native demo, and the resulting image was visually inspected (`examples/preview.jpg`).
-- The installed `.aex` hash matches the distributable. No diagnostic tracing is enabled in the release build.
+- **16/16 Rust kernel tests passed.** Includes signed/fractional offsets, recolouring, HDR, premultiplied filtering, repeated boundaries, mix bypass and cancellation, plus directional blur, blur energy beyond source bounds, padding calculations and matching cropped/expanded renders.
+- **48/48 AE 2026 checks passed** with After Effects **26.5x89**: the original 27 regression checks and 21 bounds/dimensions/upgrade checks against the final release plugin.
+- **45/45 AE 2025 checks passed** with After Effects **25.6.6x4** during development. The three saved-project upgrade checks require the AE 2026 fixture and are explicitly skipped on AE 2025.
+- **Actual full- and half-resolution frames rendered successfully with aerender.** Pixel checks confirm that expanded red and blue fringes remain outside the physical source layer, the source remains centred, and the exterior is clear at both resolutions.
+- The installed AE 2026 plugin and the distributable have matching SHA-256 hashes. Diagnostic tracing is disabled in the release build.
 
-The AE checks cover:
+## Checked behaviour
 
-- Adjustment-layer identity and RGB separation in 8-, 16- and 32-bit projects.
-- Green-to-teal recolouring and HDR colour contributions above 1.0.
-- Independent red, green and blue distance keyframes and interpolation.
-- Direction, X/Y offsets, master separation amount and Mix.
-- Master and per-channel edge softness.
-- Adjustment-layer opacity and masks.
-- Translucent and transparent source pixels, shifted fringes, and soft alpha without dark edges.
-- Smart Render requests with cropped output origins (AE's sampleImage rendering uses small regions).
+- One native effect on an adjustment layer processes multiple underlying visual layers.
+- Identity and RGB separation at 8-, 16- and 32-bit depth.
+- Green-to-teal recolouring, HDR values above white, independent channel keyframes, direction, X/Y offsets, master split and Mix.
+- Global and per-channel softness; adjustment-layer opacity and masks.
+- Translucent source pixels, transparency, displaced fringes and soft alpha without dark edges.
+- RGB contributions continue beyond the actual source layer's left, right, top and bottom edges.
+- Expansion keeps the original image aligned; two expanding Chromatic AE effects can be stacked.
+- Horizontal, Vertical and Both blur modes; per-channel overrides and master inheritance.
+- Blur tails extend beyond the source and reach transparency instead of being clipped.
+- Expansion can be disabled; Mix at zero bypasses the expanded treatment.
+- A saved 2.0 project retains its distance keyframes and custom colours, with compatible defaults for the new controls.
 
-Full host-test output: `tests/native-results-26.5.txt`.
+Reports: `tests/native-results-26.5.txt` and `tests/native-bounds-results-26.5.txt`.
 
-## Scope
+## Implementation and limits
 
-The native plugin and its renders were exercised through AE scripting and aerender. Interactive panel gestures were not manually tested. Other AE releases, Windows ARM, macOS, unusually large canvases and all possible upstream effects have not been validated. The build is Windows x64 only. CPU rendering is used. Multi-frame rendering is advertised by the plugin and uses no mutable shared render state, but a long multi-frame stress test has not been performed.
+The effect grows its SmartFX maximum output rectangle using signed channel offsets and the finite support of its three fractional box passes. The current output request is intersected with those bounds. Cropped requests, empty bounds queries, downsampling and input/output origins are handled explicitly. Blur intermediates are padded so the kernel can carry colour and alpha past the original image edge. See the [Adobe SmartFX guide](https://ae-plugins.docsforadobe.dev/smartfx/smartfx/) for the host's rectangle contract.
 
-Offsets and softness are scaled by AE's downsample factors in the implementation. A separate reduced-resolution image comparison has not been performed. Output is confined to the existing image bounds. The complete input is requested for reliable edge repetition and regional rendering, so large images with softness enabled use more memory than a simple colour effect.
+AE colour values are converted to premultiplied values for filtering and back to straight RGB for output. Repeat Edge Pixels intentionally extends edge colours; turn it off for naturally fading transparent blur tails. Layer bounds can grow, but the composition frame still limits the exported picture.
 
-AE effect-world RGB values are converted to premultiplied values for filtering, then converted back to straight RGB before returning to AE. The 27 host checks include the alpha regression that motivated this handling.
+This is a Windows x64 CPU effect. Interactive gestures, Windows ARM, macOS, unusually large canvases and every possible upstream effect have not been tested. The plugin advertises multi-frame rendering and has no mutable shared render state; a long multi-frame stress test has not been performed. Large images and softness values need additional temporary memory.
+
+In headless AE 2026, expression pixel probes returned stale empty values after `app.open`, including on an unprocessed solid. The test suite therefore performs all pixel checks before the saved-project metadata checks. Independent aerender output was also verified after reopening the project.
 
 ## Reproduce
 
 1. Run `native\build.ps1`.
 2. Close AE and run `Install Chromatic AE.cmd`.
-3. Run `tests\run-native-tests.ps1` in PowerShell. It launches a separate headless AE instance; it does not close or alter an existing user project.
+3. Run `tests\run-native-tests.ps1`. It launches a separate headless process and runs `tests/native-suite.jsx`.
+4. Run `tests/bounds-resolution.jsx` in a fresh AE process after the suite. Render its saved `test-output/bounds-resolution.aep` with aerender, then run `tests/check-bounds-renders.py` using Python and Pillow.
 
-The original ScriptUI version's evidence is preserved under `legacy/VALIDATION.md`; those tests do not count toward the native version's results.
+The 2.0 demo fixture is stored under `tests/fixtures/`. The original ScriptUI version and its separate evidence are preserved under `legacy/`.

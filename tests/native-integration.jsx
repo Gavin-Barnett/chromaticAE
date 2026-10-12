@@ -10,7 +10,7 @@
     function sample(comp,layer,point,time){time=time||0;var n=comp.layers.addNull();var p=n.property('ADBE Effect Parade').addProperty('ADBE Color Control').property(1);p.expression='thisComp.layer('+layer.index+').sampleImage(['+point.join(',')+'],[0.01,0.01],true,'+time+');';var v=p.valueAtTime(time,false);var error=p.expressionError;n.remove();if(error)throw Error(error);return v;}
     function dump(group,prefix){for(var i=1;i<=group.numProperties;i++){var p=group.property(i);lines.push(prefix+p.name+' ('+p.matchName+')');if(p.propertyType!==PropertyType.PROPERTY)dump(p,prefix+'  ');}}
     try{
-        lines.push('After Effects '+app.version+' | Chromatic AE native 2.0');
+        lines.push('After Effects '+app.version+' | Chromatic AE native 2.1');
         var comp=app.project.items.addComp('Native adjustment test',128,128,1,2,24);
         comp.layers.addSolid([0,0,0],'Background',128,128,1,2);
         comp.layers.addSolid([1,1,1],'White square',64,64,1,2);

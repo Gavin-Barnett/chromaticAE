@@ -70,6 +70,31 @@ fn source_pixel(src: &impl Source, x: i64, y: i64, repeat: bool) -> Pixel {
         _ => [0.0; 4],
     }
 }
+/// Full finite support of the three fractional box passes (in render pixels).
+pub fn blur_support(sigma: f32) -> usize {
+    if sigma <= 0.0 {
+        0
+    } else {
+        (3.0 * (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).ceil()) as usize
+    }
+}
+/// Additional output pixels, in left/top/right/bottom order. Retain the original
+/// canvas as well, so Mix and edge repetition have a stable reference.
+pub fn expansion(settings: &Settings) -> [i32; 4] {
+    let mut pad = [0.0f32; 4];
+    if settings.mix > 0.0 {
+        for ch in &settings.channels {
+            let rx = blur_support(ch.sigma[0]) as f32;
+            let ry = blur_support(ch.sigma[1]) as f32;
+            pad[0] = pad[0].max(rx - ch.offset[0]);
+            pad[1] = pad[1].max(ry - ch.offset[1]);
+            pad[2] = pad[2].max(rx + ch.offset[0]);
+            pad[3] = pad[3].max(ry + ch.offset[1]);
+        }
+    }
+    pad.map(|p| p.ceil() as i32)
+}
+
 // Three fractional box passes approximate a Gaussian. Fractional endpoints make
 // animated softness continuous, including the transition from zero blur.
 fn box_pass(
@@ -147,24 +172,43 @@ pub fn render(
         for (c, ch) in settings.channels.iter().enumerate() {
             let blurred = ch.sigma[0] > 0.0 || ch.sigma[1] > 0.0;
             let mut field: Vec<[f32; 2]> = Vec::new();
+            // Pad the intermediate image by the complete blur support. Without
+            // this, later passes discard the blur tail at the old layer bounds.
+            let px = if blurred {
+                blur_support(ch.sigma[0])
+            } else {
+                0
+            };
+            let py = if blurred {
+                blur_support(ch.sigma[1])
+            } else {
+                0
+            };
+            let fw = w.checked_add(2 * px).ok_or(RenderError::Memory)?;
+            let fh = h.checked_add(2 * py).ok_or(RenderError::Memory)?;
             if blurred {
-                let count = w.checked_mul(h).ok_or(RenderError::Memory)?;
+                let count = fw.checked_mul(fh).ok_or(RenderError::Memory)?;
                 field = zeros(count)?;
                 let mut scratch = zeros(count)?;
-                for y in 0..h {
+                for y in 0..fh {
                     if y % 32 == 0 && abort() {
                         return Err(RenderError::Cancelled);
                     }
-                    for x in 0..w {
-                        let p = src.pixel(x, y);
-                        field[y * w + x] = [p[c], p[3]];
+                    for x in 0..fw {
+                        let p = source_pixel(
+                            src,
+                            x as i64 - px as i64,
+                            y as i64 - py as i64,
+                            settings.repeat,
+                        );
+                        field[y * fw + x] = [p[c], p[3]];
                     }
                 }
                 for _ in 0..3 {
                     box_pass(
                         &field,
                         &mut scratch,
-                        (w, h),
+                        (fw, fh),
                         ch.sigma[0],
                         false,
                         settings.repeat,
@@ -173,7 +217,7 @@ pub fn render(
                     box_pass(
                         &scratch,
                         &mut field,
-                        (w, h),
+                        (fw, fh),
                         ch.sigma[1],
                         true,
                         settings.repeat,
@@ -190,8 +234,11 @@ pub fn render(
                     let sy = y as f32 + origin[1] - ch.offset[1];
                     let p = sample(sx, sy, |ix, iy| {
                         if blurred {
-                            match (index(ix, w, settings.repeat), index(iy, h, settings.repeat)) {
-                                (Some(ix), Some(iy)) => field[iy * w + ix],
+                            match (
+                                index(ix + px as i64, fw, settings.repeat),
+                                index(iy + py as i64, fh, settings.repeat),
+                            ) {
+                                (Some(ix), Some(iy)) => field[iy * fw + ix],
                                 _ => [0.0; 2],
                             }
                         } else {
@@ -355,5 +402,67 @@ mod tests {
         assert_eq!(run(&im, &s), im.2);
         s.repeat = false;
         assert_eq!(run(&im, &s)[0][0], 0.0);
+    }
+    #[test]
+    fn expanded_blur_preserves_energy_past_source_edges() {
+        let im = Image(1, 1, vec![[1.0; 4]]);
+        let mut s = settings();
+        for ch in &mut s.channels {
+            ch.sigma = [2.0, 2.0];
+        }
+        let p = render(&im, (21, 21), [-10.0, -10.0], &s, || false).unwrap();
+        near(p.iter().map(|p| p[0]).sum(), 1.0);
+        assert!(p[10 * 21 + 8][3] > 0.0);
+        assert!(p[8 * 21 + 10][3] > 0.0);
+        assert_eq!(p[0], [0.0; 4]);
+    }
+    #[test]
+    fn horizontal_blur_has_no_vertical_spread() {
+        let im = Image(1, 1, vec![[1.0; 4]]);
+        let mut s = settings();
+        for ch in &mut s.channels {
+            ch.sigma = [2.0, 0.0];
+        }
+        let p = render(&im, (21, 5), [-10.0, -2.0], &s, || false).unwrap();
+        assert!(p[2 * 21 + 8][3] > 0.0);
+        assert_eq!(p[21 + 10], [0.0; 4]);
+        near(p.iter().map(|p| p[0]).sum(), 1.0);
+    }
+    #[test]
+    fn vertical_blur_has_no_horizontal_spread() {
+        let im = Image(1, 1, vec![[1.0; 4]]);
+        let mut s = settings();
+        for ch in &mut s.channels {
+            ch.sigma = [0.0, 2.0];
+        }
+        let p = render(&im, (5, 21), [-2.0, -10.0], &s, || false).unwrap();
+        assert!(p[8 * 5 + 2][3] > 0.0);
+        assert_eq!(p[10 * 5 + 1], [0.0; 4]);
+        near(p.iter().map(|p| p[0]).sum(), 1.0);
+    }
+    #[test]
+    fn expansion_covers_signed_offsets_and_blur_support() {
+        let mut s = settings();
+        s.channels[0].offset = [-7.25, 3.5];
+        s.channels[0].sigma = [2.0, 0.0];
+        s.channels[2].offset = [9.5, -12.0];
+        assert_eq!(blur_support(2.0), 6);
+        assert_eq!(expansion(&s), [14, 12, 10, 4]);
+        s.mix = 0.0;
+        assert_eq!(expansion(&s), [0; 4]);
+    }
+    #[test]
+    fn expanded_region_matches_cropped_region() {
+        let im = Image(2, 2, vec![[1.0; 4], [0.0; 4], [0.0; 4], [0.5; 4]]);
+        let mut s = settings();
+        s.channels[0].sigma = [2.3, 1.2];
+        s.channels[0].offset = [-2.5, 0.4];
+        let all = render(&im, (20, 20), [-10.0, -10.0], &s, || false).unwrap();
+        let roi = render(&im, (2, 3), [-3.0, -2.0], &s, || false).unwrap();
+        for y in 0..3 {
+            for x in 0..2 {
+                assert_eq!(roi[y * 2 + x], all[(y + 8) * 20 + x + 7]);
+            }
+        }
     }
 }
