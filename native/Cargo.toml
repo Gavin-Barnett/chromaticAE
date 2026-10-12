@@ -1,0 +1,26 @@
+[package]
+name = "chromatic-ae"
+version = "2.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+trace = []
+
+[dependencies]
+after-effects = { git = "https://github.com/virtualritz/after-effects.git", rev = "297c5a5b17f908a46801c0b6365dbeaa9ff0fab9" }
+
+[build-dependencies]
+pipl = { git = "https://github.com/virtualritz/after-effects.git", rev = "297c5a5b17f908a46801c0b6365dbeaa9ff0fab9" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "debuginfo"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(catch_panics)', 'cfg(does_dialog)', 'cfg(with_premiere)', 'cfg(threaded_rendering)', 'cfg(smart_render)'] }

@@ -1,3 +1,9 @@
 test-output/
 dist/
 *.backup-*
+
+.deps/
+.toolchain/
+native/target/
+native/build/
+*.aep Logs/

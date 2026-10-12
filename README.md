@@ -1,71 +1,65 @@
-# Chromatic AE
+# Chromatic AE 2.0
 
-A small dockable After Effects panel for RGB splitting, channel recolouring and soft edges. Uses AE's built-in effects, so projects render without the panel installed. This is an ExtendScript panel (`.jsx`), not a compiled `.aex` effect.
+A native Windows After Effects effect for RGB separation, channel recolouring and soft edges. Apply **one effect to an adjustment layer** to process all visible layers beneath it. It also works directly on footage, text, shapes and precomps.
 
-## Fastest start
+## Install
 
-1. In After Effects, choose **File > Scripts > Run Script File**.
-2. Open **Chromatic AE.jsx**.
-3. Select your footage, text, shape layer, or precomp and click **Apply to selected layers**.
+1. Download the release ZIP and **extract all of it**.
+2. Close After Effects, then double-click **Install Chromatic AE.cmd**. Accept the Windows administrator prompt if it appears.
+3. Start After Effects. Select an adjustment layer and choose **Effect > Chromatic > Chromatic AE**, or search for **Chromatic AE** in Effects & Presets.
 
-The panel opens the **CHROMATIC - animate these controls** layer in Effect Controls. Use its stopwatches just like any other AE effect. If Effect Controls is hidden, press **F3**.
-
-On Windows you can also double-click **Start Chromatic AE.cmd**. It finds an installed AE version and runs the panel. No restart or installation is required for the floating panel.
-
-## Dock it permanently
-
-Double-click **Install Chromatic AE.cmd**. It installs to the newest detected After Effects version, requesting administrator access only when Program Files requires it. Restart AE, then choose **Window > Chromatic AE.jsx** and dock the panel.
-
-For another version, run PowerShell with:
+The installer selects the newest installed AE version. To choose another installation:
 
 ```powershell
-.\Install-Chromatic.ps1 -AfterEffectsPath 'C:\Program Files\Adobe\Adobe After Effects 2025'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Chromatic.ps1 -AfterEffectsPath "C:\Program Files\Adobe\Adobe After Effects 2025"
 ```
 
-Manual installation: copy `Chromatic AE.jsx` into your version's `Support Files\Scripts\ScriptUI Panels` folder. To uninstall, remove that one file. Existing projects continue rendering.
+Manual installation: copy `plugin\Chromatic AE.aex` into:
+
+```text
+C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Plug-ins\Chromatic AE\
+```
+
+Create the final folder if needed, and restart AE. This is a native effect; the Window menu and ScriptUI Panels folder are for the legacy version.
+
+**Another machine:** transfer the complete release ZIP, extract it, and run the same installer. No Rust, Adobe SDK, account, activation or ScriptUI panel is needed. Install the `.aex` on every machine that will render a project using it. This build is for Windows x64; it does not run on macOS or Windows ARM natively.
+
+## Use
+
+Create **Layer > New > Adjustment Layer**, put it above the layers to process, and apply **Chromatic AE** once. All controls are in Effect Controls; use their stopwatches to animate them.
+
+| Control | Behaviour |
+| --- | --- |
+| Split Amount | Scales all channel distances and X/Y offsets. 0% collapses separation; 100% uses the entered distances. |
+| Direction | Rotates the shared axis used by the three signed Distance controls. 0 degrees is horizontal; 90 degrees is vertical. |
+| Edge Softness | Softens all channel edges and details. Starts at zero. |
+| Mix | Blends the processed result with the original image. 0% bypasses the treatment. |
+| Repeat Edge Pixels | Extends boundary pixels when offsets or blur sample outside the image. Disable for transparent boundaries. |
+| Red / Green / Blue Distance | Moves that channel along Direction, in source pixels. Each can be animated independently. |
+| Red / Green / Blue X/Y Offset | Adds independent horizontal and vertical movement to that channel. |
+| Red / Green / Blue Colour | Replaces the colour contributed by that channel while retaining its intensity. Set Green Colour to teal to remap the full green channel. |
+| Red / Green / Blue Softness | Adds softness to that channel only, on top of Edge Softness. |
+
+Colour contributions add together. Custom colours can create values above white in a 32-bit project. Softness is a Gaussian-like blur of channel detail and coverage, measured in source pixels; it is not a vignette or a blur restricted to the outside border of the composition. Large softness values and large frames take longer to render.
+
+Normal adjustment-layer opacity and masks work. Results remain within the layer/composition canvas. The effect uses CPU rendering, supports 8-, 16- and 32-bit projects, and scales separation and softness for reduced-resolution previews.
 
 ## Demo
 
-Run **Create Demo.jsx** from File > Scripts > Run Script File to create an animated example with independent red and blue movement and a teal green channel. The downloadable package also contains a rendered preview and an AE 2026 demo project.
+Open `examples\Chromatic AE Native Demo.aep`, or choose **File > Scripts > Run Script File** and select `Create Demo.jsx` to add the demo to your current project. The demo uses text, shapes, a background, and one adjustment layer with one Chromatic AE effect.
 
-## Controls
+## Previous version
 
-| Control | What it does |
-| --- | --- |
-| Split Amount (%) | Scales all distances and XY offsets. 0 aligns the channels; 100 uses the distances as entered. |
-| Direction | Rotates the shared split axis. 0 is horizontal; 90 is vertical. |
-| Edge Softness (px) | Adds Gaussian softness to every channel and its transparency. |
-| Red / Green / Blue Distance (px) | Independent signed distances along the shared axis. Animate each separately. |
-| Red / Green / Blue XY Offset | Additional independent offsets for two-dimensional movement. |
-| Red / Green / Blue Colour | Replaces that channel's full colour contribution, retaining its original intensity. |
-| Red / Green / Blue Softness (px) | Adds softness to one channel. Combines with the master softness. |
+`legacy/` preserves the original 1.0 ScriptUI/precomp rig for existing projects. It is superseded by this native effect. Existing rigs are not automatically converted; use a new adjustment layer and the native effect for new work. The old panel can coexist with the native plugin.
 
-For green-to-teal, select the **Green to teal** starting look, or change **Green Colour** to teal. Colours can be keyframed too. Colour remapping is additive: remapped contributions can brighten overlaps. Use a 32-bpc project when you want to retain values above white.
+## Build from source
 
-The softness controls blur each channel's image edges and fine detail. They are not a separate frame-border vignette. To restore an unchanged image, use Split Amount 0, all softness values 0 and the default pure RGB colours.
+Install stable Rust with the MSVC target and Visual Studio C++ Build Tools with the Windows SDK. Run:
 
-## Editing and animation
+```powershell
+.\native\build.ps1
+```
 
-- The panel creates one output precomp in your timeline and a named project folder for its source and internal passes.
-- **Open controls** finds the selected Chromatic output and opens its controls at the current source time.
-- **Edit source** opens your original editable layers. Their existing effects and animation remain inside the source precomp.
-- Keyframe the controls inside the Chromatic comp. They travel with the source when its output is trimmed, moved or time-remapped.
-- **Edit > Undo** reverts an application in one step.
-- Each newly applied rig is independent. Duplicating an existing output layer shares its underlying source and controls, as with any AE precomp. Apply to a fresh source for a separate rig.
-- Negative distances are supported. Negative total softness is clamped to zero.
+The build uses pinned open-source `after-effects` bindings and `pipl` resource tooling, including upstream Windows resource and concurrency fixes. No Adobe SDK download is required for this build. `Cargo.lock` is committed. `native/build.ps1` runs the kernel tests, builds the release library and copies it to `plugin/Chromatic AE.aex`.
 
-## Scope
-
-Tested in After Effects 26.5 on Windows: 16 integration checks passed, including rendered pixel samples in 8-, 16- and 32-bpc projects. Ordinary 2D footage, text, shapes and precomps are supported. Adjacent selected layers are processed together. For 3D scenes, adjustment layers, track mattes, blend-mode composites, or parenting outside the selection, precompose the complete visual group first.
-
-As with normal precomposition, expressions depending on the original comp's layer indices, external layer names or `thisComp` may need updating. Keep the generated control names and internal layers intact. The rig crops at composition bounds; large splits on full-frame footage may expose coloured frame edges. There is no automatic edge extension or lens distortion in this release.
-
-The rig uses three colour passes plus three alpha-coverage passes. This preserves displaced transparent fringes and avoids piling up alpha at overlapping edges. It costs more than a single native effect; preview at half resolution if needed. Audio passes through once.
-
-## Development
-
-- `tests/integration.jsx`: AE pixel samples for identity, transparency, channel remapping, independent offsets, keyframing, softness and trim preservation. Run in a disposable AE project.
-- `tests/test-expressions.cjs`: dependency-free Node checks for the generated offset expressions.
-- `test-output/`: local test projects and reports; excluded from Git.
-
-Implementation references: [Adobe scripting](https://helpx.adobe.com/after-effects/using/scripts.html), [channel effects](https://helpx.adobe.com/after-effects/using/channel-effects.html), and [Adobe scripting API reference](https://ae-scripting.docsforadobe.dev/).
+`tests/native-integration.jsx` checks the actual effect inside AE. See `VALIDATION.md` for tested behaviour and limitations. Dependency notices are in `THIRD-PARTY-NOTICES.txt`.
