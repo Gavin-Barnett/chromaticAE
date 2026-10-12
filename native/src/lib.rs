@@ -1,5 +1,8 @@
 use after_effects as ae;
 mod engine;
+#[cfg(test)]
+#[path = "../benches/reference_v21.rs"]
+mod reference_v21;
 use engine::{Channel, Settings, Source};
 
 #[derive(Eq, PartialEq, Hash, Clone, Copy, Debug)]
@@ -36,6 +39,7 @@ enum Params {
     GreenDimensions,
     BlueDimensions,
     ExpandBounds,
+    CentreRestore,
 }
 #[derive(Default)]
 struct Plugin;
@@ -139,6 +143,8 @@ fn settings(params: &ae::Parameters<Params>, data: InData) -> Result<Settings, E
         channels,
         mix: (scalar(params, Params::Mix)? / 100.0).clamp(0.0, 1.0),
         repeat: params.get(Params::Repeat)?.as_checkbox()?.value(),
+        centre_restore: (scalar(params, Params::CentreRestore)? / 100.0).clamp(0.0, 1.0),
+        reference_bounds: None,
     })
 }
 struct World<'a>(&'a ae::Layer, i16);
@@ -187,7 +193,7 @@ fn render(
     params: &ae::Parameters<Params>,
     legacy: bool,
 ) -> Result<(), Error> {
-    let s = settings(params, data)?;
+    let mut s = settings(params, data)?;
     let depth = input.bit_depth();
     if ![8, 16, 32].contains(&depth) || output.bit_depth() != depth {
         return Err(Error::BadCallbackParameter);
@@ -195,6 +201,19 @@ fn render(
     let source = World(input, depth);
     let a = input.origin();
     let b = output.origin();
+    // Keep the restoration centred on the original layer, not on a cropped ROI
+    // or a buffer expanded by an earlier effect.
+    let source_origin = if legacy {
+        data.pre_effect_source_origin()
+    } else {
+        ae::Point { h: -a.h, v: -a.v }
+    };
+    s.reference_bounds = Some([
+        source_origin.h as f32,
+        source_origin.v as f32,
+        source_origin.h as f32 + data.width() as f32 * f32::from(data.downsample_x()),
+        source_origin.v as f32 + data.height() as f32 * f32::from(data.downsample_y()),
+    ]);
     let pixels = engine::render(
         &source,
         (output.width(), output.height()),
@@ -313,6 +332,15 @@ impl AdobePluginGlobal for Plugin {
                 f.set_default(1);
                 f.set_value(1);
             }),
+        )?;
+        slider(
+            params,
+            Params::CentreRestore,
+            "Centre Colour Restore",
+            0.0,
+            0.0,
+            100.0,
+            true,
         )?;
         slider(params, Params::Mix, "Mix", 100.0, 0.0, 100.0, true)?;
         params.add(
@@ -467,7 +495,7 @@ impl AdobePluginGlobal for Plugin {
         params: &mut ae::Parameters<Params>,
     ) -> Result<(), Error> {
         match cmd {
-            ae::Command::About => out_data.set_return_msg("Chromatic AE 2.1\rRGB split, recolouring and directional edge softness.\rExpanded output for footage and adjustment layers."),
+            ae::Command::About => out_data.set_return_msg("Chromatic AE 2.2\rRGB split, recolouring and directional edge softness.\rExpanded output for footage and adjustment layers."),
             ae::Command::FrameSetup {in_layer,..} => {
                 let pad=if params.get(Params::ExpandBounds)?.as_checkbox()?.value() {
                     engine::expansion(&settings(params,in_data)?)

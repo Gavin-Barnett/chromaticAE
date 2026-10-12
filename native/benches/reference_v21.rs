@@ -1,0 +1,277 @@
+#![allow(dead_code)]
+// Frozen v2.1 rendering kernel for output-equivalence and benchmark comparisons.
+//! Premultiplied, HDR-preserving channel separation and continuous edge softness.
+pub type Pixel = [f32; 4]; // RGB, alpha
+pub trait Source {
+    fn size(&self) -> (usize, usize);
+    fn pixel(&self, x: usize, y: usize) -> Pixel;
+}
+#[derive(Clone, Copy, Debug)]
+pub struct Channel {
+    pub offset: [f32; 2],
+    pub colour: [f32; 3],
+    pub sigma: [f32; 2],
+}
+#[derive(Clone, Debug)]
+pub struct Settings {
+    pub channels: [Channel; 3],
+    pub mix: f32,
+    pub repeat: bool,
+}
+#[derive(Debug, PartialEq)]
+pub enum RenderError {
+    Memory,
+    Cancelled,
+}
+fn zeros<T: Default + Clone>(len: usize) -> Result<Vec<T>, RenderError> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(len).map_err(|_| RenderError::Memory)?;
+    v.resize(len, T::default());
+    Ok(v)
+}
+fn index(x: i64, n: usize, repeat: bool) -> Option<usize> {
+    if n == 0 {
+        None
+    } else if repeat {
+        Some(x.clamp(0, n as i64 - 1) as usize)
+    } else if x >= 0 && x < n as i64 {
+        Some(x as usize)
+    } else {
+        None
+    }
+}
+fn sample<const N: usize>(x: f32, y: f32, get: impl Fn(i64, i64) -> [f32; N]) -> [f32; N] {
+    let ix = x.floor() as i64;
+    let iy = y.floor() as i64;
+    let tx = x - x.floor();
+    let ty = y - y.floor();
+    let p = [
+        get(ix, iy),
+        get(ix + 1, iy),
+        get(ix, iy + 1),
+        get(ix + 1, iy + 1),
+    ];
+    let weights = [
+        (1.0 - tx) * (1.0 - ty),
+        tx * (1.0 - ty),
+        (1.0 - tx) * ty,
+        tx * ty,
+    ];
+    let mut result = [0.0; N];
+    for c in 0..N {
+        for k in 0..4 {
+            result[c] += p[k][c] * weights[k];
+        }
+    }
+    result
+}
+fn source_pixel(src: &impl Source, x: i64, y: i64, repeat: bool) -> Pixel {
+    let (w, h) = src.size();
+    match (index(x, w, repeat), index(y, h, repeat)) {
+        (Some(x), Some(y)) => src.pixel(x, y),
+        _ => [0.0; 4],
+    }
+}
+/// Full finite support of the three fractional box passes (in render pixels).
+pub fn blur_support(sigma: f32) -> usize {
+    if sigma <= 0.0 {
+        0
+    } else {
+        (3.0 * (((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5).ceil()) as usize
+    }
+}
+/// Additional output pixels, in left/top/right/bottom order. Retain the original
+/// canvas as well, so Mix and edge repetition have a stable reference.
+pub fn expansion(settings: &Settings) -> [i32; 4] {
+    let mut pad = [0.0f32; 4];
+    if settings.mix > 0.0 {
+        for ch in &settings.channels {
+            let rx = blur_support(ch.sigma[0]) as f32;
+            let ry = blur_support(ch.sigma[1]) as f32;
+            pad[0] = pad[0].max(rx - ch.offset[0]);
+            pad[1] = pad[1].max(ry - ch.offset[1]);
+            pad[2] = pad[2].max(rx + ch.offset[0]);
+            pad[3] = pad[3].max(ry + ch.offset[1]);
+        }
+    }
+    pad.map(|p| p.ceil() as i32)
+}
+
+// Three fractional box passes approximate a Gaussian. Fractional endpoints make
+// animated softness continuous, including the transition from zero blur.
+fn box_pass(
+    input: &[[f32; 2]],
+    output: &mut [[f32; 2]],
+    size: (usize, usize),
+    sigma: f32,
+    vertical: bool,
+    repeat: bool,
+    abort: &mut impl FnMut() -> bool,
+) -> Result<(), RenderError> {
+    if sigma <= 0.0 {
+        output.copy_from_slice(input);
+        return Ok(());
+    }
+    let radius = ((1.0 + 4.0 * sigma * sigma).sqrt() - 1.0) * 0.5;
+    let r = radius.floor() as i64;
+    let f = (radius - r as f32) as f64;
+    let norm = 2.0 * r as f64 + 1.0 + 2.0 * f;
+    let (w, h) = size;
+    let (lines, len) = if vertical { (w, h) } else { (h, w) };
+    for line in 0..lines {
+        if line % 32 == 0 && abort() {
+            return Err(RenderError::Cancelled);
+        }
+        let at = |pos: i64| -> [f32; 2] {
+            match index(pos, len, repeat) {
+                Some(i) => input[if vertical { i * w + line } else { line * w + i }],
+                None => [0.0; 2],
+            }
+        };
+        let mut sum = [0.0f64; 2];
+        for k in -r..=r {
+            let p = at(k);
+            for c in 0..2 {
+                sum[c] += p[c] as f64;
+            }
+        }
+        for pos in 0..len {
+            let p = pos as i64;
+            let left = at(p - r - 1);
+            let right = at(p + r + 1);
+            let dst = if vertical {
+                pos * w + line
+            } else {
+                line * w + pos
+            };
+            for c in 0..2 {
+                output[dst][c] = ((sum[c] + f * (left[c] as f64 + right[c] as f64)) / norm) as f32;
+            }
+            let remove = at(p - r);
+            let add = at(p + r + 1);
+            for c in 0..2 {
+                sum[c] += add[c] as f64 - remove[c] as f64;
+            }
+        }
+    }
+    Ok(())
+}
+pub fn render(
+    src: &impl Source,
+    output_size: (usize, usize),
+    origin: [f32; 2],
+    settings: &Settings,
+    mut abort: impl FnMut() -> bool,
+) -> Result<Vec<Pixel>, RenderError> {
+    let (w, h) = src.size();
+    let (ow, oh) = output_size;
+    let n = ow.checked_mul(oh).ok_or(RenderError::Memory)?;
+    let mut result: Vec<Pixel> = zeros(n)?;
+    if w == 0 || h == 0 {
+        return Ok(result);
+    }
+    if settings.mix > 0.0 {
+        for (c, ch) in settings.channels.iter().enumerate() {
+            let blurred = ch.sigma[0] > 0.0 || ch.sigma[1] > 0.0;
+            let mut field: Vec<[f32; 2]> = Vec::new();
+            // Pad the intermediate image by the complete blur support. Without
+            // this, later passes discard the blur tail at the old layer bounds.
+            let px = if blurred {
+                blur_support(ch.sigma[0])
+            } else {
+                0
+            };
+            let py = if blurred {
+                blur_support(ch.sigma[1])
+            } else {
+                0
+            };
+            let fw = w.checked_add(2 * px).ok_or(RenderError::Memory)?;
+            let fh = h.checked_add(2 * py).ok_or(RenderError::Memory)?;
+            if blurred {
+                let count = fw.checked_mul(fh).ok_or(RenderError::Memory)?;
+                field = zeros(count)?;
+                let mut scratch = zeros(count)?;
+                for y in 0..fh {
+                    if y % 32 == 0 && abort() {
+                        return Err(RenderError::Cancelled);
+                    }
+                    for x in 0..fw {
+                        let p = source_pixel(
+                            src,
+                            x as i64 - px as i64,
+                            y as i64 - py as i64,
+                            settings.repeat,
+                        );
+                        field[y * fw + x] = [p[c], p[3]];
+                    }
+                }
+                for _ in 0..3 {
+                    box_pass(
+                        &field,
+                        &mut scratch,
+                        (fw, fh),
+                        ch.sigma[0],
+                        false,
+                        settings.repeat,
+                        &mut abort,
+                    )?;
+                    box_pass(
+                        &scratch,
+                        &mut field,
+                        (fw, fh),
+                        ch.sigma[1],
+                        true,
+                        settings.repeat,
+                        &mut abort,
+                    )?;
+                }
+            }
+            for y in 0..oh {
+                if y % 32 == 0 && abort() {
+                    return Err(RenderError::Cancelled);
+                }
+                for x in 0..ow {
+                    let sx = x as f32 + origin[0] - ch.offset[0];
+                    let sy = y as f32 + origin[1] - ch.offset[1];
+                    let p = sample(sx, sy, |ix, iy| {
+                        if blurred {
+                            match (
+                                index(ix + px as i64, fw, settings.repeat),
+                                index(iy + py as i64, fh, settings.repeat),
+                            ) {
+                                (Some(ix), Some(iy)) => field[iy * fw + ix],
+                                _ => [0.0; 2],
+                            }
+                        } else {
+                            let p = source_pixel(src, ix, iy, settings.repeat);
+                            [p[c], p[3]]
+                        }
+                    });
+                    let out = &mut result[y * ow + x];
+                    for j in 0..3 {
+                        out[j] += p[0] * ch.colour[j];
+                    }
+                    out[3] = out[3].max(p[1]);
+                }
+            }
+        }
+    }
+    if settings.mix < 1.0 {
+        for y in 0..oh {
+            if y % 32 == 0 && abort() {
+                return Err(RenderError::Cancelled);
+            }
+            for x in 0..ow {
+                let base = sample(x as f32 + origin[0], y as f32 + origin[1], |ix, iy| {
+                    source_pixel(src, ix, iy, false)
+                });
+                for c in 0..4 {
+                    result[y * ow + x][c] =
+                        result[y * ow + x][c] * settings.mix + base[c] * (1.0 - settings.mix);
+                }
+            }
+        }
+    }
+    Ok(result)
+}

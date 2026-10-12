@@ -21,6 +21,7 @@
         }
         var adjustment=comp.layers.addSolid([1,1,1],'CHROMATIC AE - select for controls',960,540,1,5);adjustment.adjustmentLayer=true;
         var fx=adjustment.property('ADBE Effect Parade').addProperty('ChromaticAE RGB Split');
+        fx.property('Centre Colour Restore').setValue(85);
         fx.property('Green Colour').setValue([0,0.85,0.65,1]);
         fx.property('Red Distance').setValueAtTime(0,-1);fx.property('Red Distance').setValueAtTime(2,-12);fx.property('Red Distance').setValueAtTime(4,-1);
         fx.property('Blue Distance').setValueAtTime(0,1);fx.property('Blue Distance').setValueAtTime(2,9);fx.property('Blue Distance').setValueAtTime(4,1);

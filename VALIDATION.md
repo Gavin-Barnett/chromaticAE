@@ -1,15 +1,16 @@
-# Native effect validation - 2.1.0
+# Native effect validation - 2.2.0
 
 Tested on Windows x64 on 12 October 2026.
 
-- **16/16 Rust kernel tests passed.** Includes signed/fractional offsets, recolouring, HDR, premultiplied filtering, repeated boundaries, mix bypass and cancellation, plus directional blur, blur energy beyond source bounds, padding calculations and matching cropped/expanded renders.
-- **48/48 AE 2026 checks passed** with After Effects **26.5x89**: the original 27 regression checks and 21 bounds/dimensions/upgrade checks against the final release plugin.
-- **45/45 AE 2025 checks passed** with After Effects **25.6.6x4** during development. The three saved-project upgrade checks require the AE 2026 fixture and are explicitly skipped on AE 2025.
-- **Actual full- and half-resolution frames rendered successfully with aerender.** Pixel checks confirm that expanded red and blue fringes remain outside the physical source layer, the source remains centred, and the exterior is clear at both resolutions.
+- **20/20 Rust kernel tests passed.** Includes signed/fractional offsets, recolouring, HDR, premultiplied filtering, repeated boundaries, mix bypass and cancellation, plus directional blur, blur energy beyond source bounds, padding calculations and matching cropped/expanded renders. New tests compare optimized output against the frozen 2.1 renderer across cropped regions, fractional offsets, blur modes, mixed results and edge policies, and verify centre restoration with transparency and expanded inputs.
+- **63/63 AE 2026 checks passed** with After Effects **26.5x89**: 27 regression checks, 15 centre restoration checks and 21 bounds/dimensions/upgrade checks against the final release plugin.
+- **60/60 AE 2025 checks passed** with After Effects **25.6.6x4** against the same release plugin. The three saved-project upgrade checks require the AE 2026 fixture and are explicitly skipped on AE 2025.
+- **Actual full- and half-resolution frames rendered successfully with aerender.** Pixel checks confirm that expanded red and blue fringes remain outside the physical source layer, the source remains centred, and the exterior is clear at both resolutions. Centre-restoration renders also match the original green centre while retaining the recoloured outside at full and half resolution.
 - The installed AE 2026 plugin and the distributable have matching SHA-256 hashes. Diagnostic tracing is disabled in the release build.
 
 ## Checked behaviour
 
+- Centre restoration at 8-, 16- and 32-bit depth; 0/50/100% strength, animated strength, soft transition, Mix, blurred detail, expanded fringes and an asymmetrically expanded upstream input.
 - One native effect on an adjustment layer processes multiple underlying visual layers.
 - Identity and RGB separation at 8-, 16- and 32-bit depth.
 - Green-to-teal recolouring, HDR values above white, independent channel keyframes, direction, X/Y offsets, master split and Mix.
@@ -20,13 +21,13 @@ Tested on Windows x64 on 12 October 2026.
 - Horizontal, Vertical and Both blur modes; per-channel overrides and master inheritance.
 - Blur tails extend beyond the source and reach transparency instead of being clipped.
 - Expansion can be disabled; Mix at zero bypasses the expanded treatment.
-- A saved 2.0 project retains its distance keyframes and custom colours, with compatible defaults for the new controls.
+- A saved 2.0 project retains its distance keyframes and custom colours, with compatible defaults for the new controls, including centre restoration at zero.
 
-Reports: `tests/native-results-26.5.txt` and `tests/native-bounds-results-26.5.txt`.
+Reports: `tests/native-results-26.5.txt`, `tests/native-centre-results-26.5.txt` and `tests/native-bounds-results-26.5.txt`, with corresponding `25.6` reports. Kernel performance measurements and reproduction instructions are in `PERFORMANCE.md`.
 
 ## Implementation and limits
 
-The effect grows its SmartFX maximum output rectangle using signed channel offsets and the finite support of its three fractional box passes. The current output request is intersected with those bounds. Cropped requests, empty bounds queries, downsampling and input/output origins are handled explicitly. Blur intermediates are padded so the kernel can carry colour and alpha past the original image edge. See the [Adobe SmartFX guide](https://ae-plugins.docsforadobe.dev/smartfx/smartfx/) for the host's rectangle contract.
+The effect grows its SmartFX maximum output rectangle using signed channel offsets and the finite support of its three fractional box passes. The current output request is intersected with those bounds. Cropped requests, empty bounds queries, downsampling and input/output origins are handled explicitly. Blur intermediates include complete convolution support around the requested output region so the kernel can carry colour and alpha past the original image edge. The optimization retains full input checkout for correct repeat-edge sampling and upstream effects. See the [Adobe SmartFX guide](https://ae-plugins.docsforadobe.dev/smartfx/smartfx/) for the host's rectangle contract.
 
 AE colour values are converted to premultiplied values for filtering and back to straight RGB for output. Repeat Edge Pixels intentionally extends edge colours; turn it off for naturally fading transparent blur tails. Layer bounds can grow, but the composition frame still limits the exported picture.
 
@@ -39,6 +40,6 @@ In headless AE 2026, expression pixel probes returned stale empty values after `
 1. Run `native\build.ps1`.
 2. Close AE and run `Install Chromatic AE.cmd`.
 3. Run `tests\run-native-tests.ps1`. It launches a separate headless process and runs `tests/native-suite.jsx`.
-4. Run `tests/bounds-resolution.jsx` in a fresh AE process after the suite. Render its saved `test-output/bounds-resolution.aep` with aerender, then run `tests/check-bounds-renders.py` using Python and Pillow.
+4. Run `tests/bounds-resolution.jsx` and `tests/centre-resolution.jsx` in fresh AE processes after the suite. Render their saved `test-output/bounds-resolution.aep` and `test-output/centre-resolution.aep` with aerender, then run `tests/check-bounds-renders.py` and `tests/check-centre-renders.py` using Python and Pillow.
 
 The 2.0 demo fixture is stored under `tests/fixtures/`. The original ScriptUI version and its separate evidence are preserved under `legacy/`.

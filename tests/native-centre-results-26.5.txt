@@ -1,0 +1,17 @@
+Chromatic AE 2.2 centre restoration | After Effects 26.5x89
+PASS Default zero preserves existing looks
+PASS Original centre colour and detail on adjustment layer at 8 bpc | 0,1,0,1
+PASS Outer edge keeps aberration at 8 bpc | 0.20000001788139,0.40000003576279,0.45490199327469,1
+PASS Original centre colour and detail on adjustment layer at 16 bpc | 0,1,0,1
+PASS Outer edge keeps aberration at 16 bpc | 0.20001220703125,0.39999389648438,0.45001220703125,1
+PASS Original centre colour and detail on adjustment layer at 32 bpc | 0,1,0,1
+PASS Outer edge keeps aberration at 32 bpc | 0.20000000298023,0.40000003576279,0.45000001788139,1
+PASS 50 percent restores half the centre treatment | 0.10000000149012,0.90000003576279,0.40000003576279,1
+PASS Smooth transition between original centre and treated edge | 0.20000001788139,0.48088511824608,0.16690215468407,1
+PASS Mix zero still gives original image
+PASS Centre restoration keyframes render
+PASS Centre restores detail lost to blur
+PASS Direct layer centre restores within expanded output
+PASS Restoration retains fringe beyond source bounds
+PASS Centre stays aligned after upstream asymmetric expansion | 0,1,1,1
+RESULT 15 passed, 0 failed

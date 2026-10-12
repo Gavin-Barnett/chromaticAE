@@ -6,7 +6,7 @@
     function set(fx,name,v){fx.property(name).setValue(v);}
     function sample(comp,layer,p){var n=comp.layers.addNull(),c=n.property('ADBE Effect Parade').addProperty('ADBE Color Control').property(1);c.expression='thisComp.layer('+layer.index+').sampleImage(['+p.join(',')+'],[0.01,0.01],true,0);';var v=c.valueAtTime(0,false),e=c.expressionError;n.remove();if(e)throw Error(e);return v;}
     try{
-        lines.push('Chromatic AE 2.1 bounds/dimensions | After Effects '+app.version);
+        lines.push('Chromatic AE 2.2 bounds/dimensions | After Effects '+app.version);
         var comp=app.project.items.addComp('Expanded source test',256,256,1,2,24);
         var layer=comp.layers.addSolid([1,1,1],'64px source',64,64,1,2);
         var fx=layer.property('ADBE Effect Parade').addProperty('ChromaticAE RGB Split');
@@ -41,7 +41,7 @@
         var ofx=old.layer('CHROMATIC AE - select for controls').property('ADBE Effect Parade').property('ChromaticAE RGB Split');
         check(ofx.property('Red Distance').numKeys===3 && ofx.property('Red Distance').keyValue(2)===-12,'2.0 project keeps animated distance');
         check(near(ofx.property('Green Colour').value,[0,0.85,0.65,1],0.001),'2.0 project keeps custom colour',ofx.property('Green Colour').value);
-        check(ofx.property('Blur Dimensions').value===1 && ofx.property('Red Blur Dimensions').value===1 && ofx.property('Expand Layer Bounds').value===1,'2.0 project receives compatible new defaults');
+        check(ofx.property('Blur Dimensions').value===1 && ofx.property('Red Blur Dimensions').value===1 && ofx.property('Expand Layer Bounds').value===1 && ofx.property('Centre Colour Restore').value===0,'2.0 project receives compatible new defaults');
         } else { lines.push('SKIP 2.0 project upgrade: fixture requires AE 2026'); }
 
     }catch(e){failed++;lines.push('FATAL '+e.toString()+' line '+e.line);}

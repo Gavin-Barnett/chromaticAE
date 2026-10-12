@@ -1,0 +1,21 @@
+Chromatic AE 2.2 bounds/dimensions | After Effects 25.6.6x4
+PASS Channels extend beyond physical layer at 8 bpc | left=1,0,0,1 right=0,0,1,1
+PASS Expansion preserves original position at 8 bpc | 1,1,1,1
+PASS Channels extend beyond physical layer at 16 bpc | left=1,0,0,1 right=0,0,1,1
+PASS Expansion preserves original position at 16 bpc | 1,1,1,1
+PASS Channels extend beyond physical layer at 32 bpc | left=1,0,0,1 right=0,0,1,1
+PASS Expansion preserves original position at 32 bpc | 1,1,1,1
+PASS Bounds switch restores original cropping
+PASS Horizontal blur extends horizontally only | left=1,1,1,0.25670552253723 top=0,0,0,0
+PASS Vertical blur extends vertically only | left=0,0,0,0 top=1,1,1,0.25670552253723
+PASS Both dimensions blur beyond every edge | left=1,1,1,0.25670552253723 top=1,1,1,0.25670552253723
+PASS Extended blur retains straight colour | 1,1,1,0.25670552253723
+PASS Blur tail ends in transparency
+PASS Red override blurs vertically | 1,0,0,0.25670552253723
+PASS Green and blue inherit horizontal master | 0,1,1,0.25670552253723
+PASS All channel dimension overrides work | 1,1,1,0.25670552253723
+PASS Mix zero bypasses expanded blur
+PASS Separation extends beyond top and bottom | up=1,0,0,1 down=0,0,1,1
+PASS Stacked expanding effects retain origins | 1,0,0,1
+SKIP 2.0 project upgrade: fixture requires AE 2026
+RESULT 18 passed, 0 failed

@@ -1,4 +1,4 @@
-Chromatic AE 2.1 bounds/dimensions | After Effects 26.5x89
+Chromatic AE 2.2 bounds/dimensions | After Effects 26.5x89
 PASS Channels extend beyond physical layer at 8 bpc | left=1,0,0,1 right=0,0,1,1
 PASS Expansion preserves original position at 8 bpc | 1,1,1,1
 PASS Channels extend beyond physical layer at 16 bpc | left=1,0,0,1 right=0,0,1,1

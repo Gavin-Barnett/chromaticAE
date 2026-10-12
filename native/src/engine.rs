@@ -15,6 +15,9 @@ pub struct Settings {
     pub channels: [Channel; 3],
     pub mix: f32,
     pub repeat: bool,
+    pub centre_restore: f32,
+    /// Original layer bounds in input-buffer coordinates, independent of ROI/expansion.
+    pub reference_bounds: Option<[f32; 4]>,
 }
 #[derive(Debug, PartialEq)]
 pub enum RenderError {
@@ -43,6 +46,21 @@ fn sample<const N: usize>(x: f32, y: f32, get: impl Fn(i64, i64) -> [f32; N]) ->
     let iy = y.floor() as i64;
     let tx = x - x.floor();
     let ty = y - y.floor();
+    // Exact integer and one-dimensional translations are common in AE. Avoid
+    // loading neighbours whose bilinear weights are zero.
+    if tx == 0.0 && ty == 0.0 {
+        return get(ix, iy);
+    }
+    if ty == 0.0 {
+        let a = get(ix, iy);
+        let b = get(ix + 1, iy);
+        return std::array::from_fn(|c| a[c] * (1.0 - tx) + b[c] * tx);
+    }
+    if tx == 0.0 {
+        let a = get(ix, iy);
+        let b = get(ix, iy + 1);
+        return std::array::from_fn(|c| a[c] * (1.0 - ty) + b[c] * ty);
+    }
     let p = [
         get(ix, iy),
         get(ix + 1, iy),
@@ -55,13 +73,9 @@ fn sample<const N: usize>(x: f32, y: f32, get: impl Fn(i64, i64) -> [f32; N]) ->
         (1.0 - tx) * ty,
         tx * ty,
     ];
-    let mut result = [0.0; N];
-    for c in 0..N {
-        for k in 0..4 {
-            result[c] += p[k][c] * weights[k];
-        }
-    }
-    result
+    std::array::from_fn(|c| {
+        p[0][c] * weights[0] + p[1][c] * weights[1] + p[2][c] * weights[2] + p[3][c] * weights[3]
+    })
 }
 fn source_pixel(src: &impl Source, x: i64, y: i64, repeat: bool) -> Pixel {
     let (w, h) = src.size();
@@ -115,7 +129,45 @@ fn box_pass(
     let f = (radius - r as f32) as f64;
     let norm = 2.0 * r as f64 + 1.0 + 2.0 * f;
     let (w, h) = size;
-    let (lines, len) = if vertical { (w, h) } else { (h, w) };
+    if vertical {
+        // Accumulate complete rows. Scanning down each column caused a cache
+        // miss per pixel on larger frames; adjacent columns share the row cache.
+        let mut sums: Vec<[f64; 2]> = zeros(w)?;
+        let zero: Vec<[f32; 2]> = zeros(w)?;
+        let row = |y: i64| -> &[[f32; 2]] {
+            match index(y, h, repeat) {
+                Some(y) => &input[y * w..(y + 1) * w],
+                None => &zero,
+            }
+        };
+        for y in -r..=r {
+            let p = row(y);
+            for x in 0..w {
+                for c in 0..2 {
+                    sums[x][c] += p[x][c] as f64;
+                }
+            }
+        }
+        for y in 0..h {
+            if y % 32 == 0 && abort() {
+                return Err(RenderError::Cancelled);
+            }
+            let i = y as i64;
+            let left = row(i - r - 1);
+            let right = row(i + r + 1);
+            let remove = row(i - r);
+            let out = &mut output[y * w..(y + 1) * w];
+            for x in 0..w {
+                for c in 0..2 {
+                    out[x][c] =
+                        ((sums[x][c] + f * (left[x][c] as f64 + right[x][c] as f64)) / norm) as f32;
+                    sums[x][c] += right[x][c] as f64 - remove[x][c] as f64;
+                }
+            }
+        }
+        return Ok(());
+    }
+    let (lines, len) = (h, w);
     for line in 0..lines {
         if line % 32 == 0 && abort() {
             return Err(RenderError::Cancelled);
@@ -154,6 +206,58 @@ fn box_pass(
     }
     Ok(())
 }
+/// Region of the padded source required for this channel's requested output.
+fn work_rect(
+    size: (usize, usize),
+    out: (usize, usize),
+    origin: [f32; 2],
+    ch: &Channel,
+    repeat: bool,
+) -> [i64; 4] {
+    let axis = |n: usize, len: usize, o: f32, offset: f32, sigma: f32| -> (i64, i64) {
+        let p = blur_support(sigma) as i64;
+        let lo = -p;
+        let hi = n as i64 + p;
+        if len == 0 || hi <= lo {
+            return (0, 0);
+        }
+        let a = (o - offset).floor() as i64;
+        let b = (o + (len - 1) as f32 - offset).ceil() as i64;
+        let (a, b) = if repeat {
+            (a.clamp(lo, hi - 1), b.clamp(lo, hi - 1))
+        } else {
+            (a.max(lo), b.min(hi - 1))
+        };
+        if a > b {
+            return (0, 0);
+        }
+        ((a - p).max(lo), (b + 1 + p).min(hi))
+    };
+    let (l, r) = axis(size.0, out.0, origin[0], ch.offset[0], ch.sigma[0]);
+    let (t, b) = axis(size.1, out.1, origin[1], ch.offset[1], ch.sigma[1]);
+    [l, t, r, b]
+}
+fn centre_weight(x: f32, y: f32, size: (usize, usize), settings: &Settings) -> f32 {
+    if settings.centre_restore <= 0.0 {
+        return 0.0;
+    }
+    let [l, t, r, b] =
+        settings
+            .reference_bounds
+            .unwrap_or([0.0, 0.0, size.0 as f32, size.1 as f32]);
+    let rx = (r - l) * 0.5;
+    let ry = (b - t) * 0.5;
+    if rx <= 0.0 || ry <= 0.0 {
+        return 0.0;
+    }
+    let nx = (x + 0.5 - (l + rx)) / rx;
+    let ny = (y + 0.5 - (t + ry)) / ry;
+    let radius = (nx * nx + ny * ny).sqrt();
+    // Keep an inner plateau completely original at 100%, then use a smooth
+    // elliptical falloff. No original-image blend at the outer layer edges.
+    let fade = ((radius - 0.35) / 0.55).clamp(0.0, 1.0);
+    settings.centre_restore.clamp(0.0, 1.0) * (1.0 - fade * fade * (3.0 - 2.0 * fade))
+}
 pub fn render(
     src: &impl Source,
     output_size: (usize, usize),
@@ -172,21 +276,17 @@ pub fn render(
         for (c, ch) in settings.channels.iter().enumerate() {
             let blurred = ch.sigma[0] > 0.0 || ch.sigma[1] > 0.0;
             let mut field: Vec<[f32; 2]> = Vec::new();
-            // Pad the intermediate image by the complete blur support. Without
-            // this, later passes discard the blur tail at the old layer bounds.
-            let px = if blurred {
-                blur_support(ch.sigma[0])
-            } else {
-                0
-            };
-            let py = if blurred {
-                blur_support(ch.sigma[1])
-            } else {
-                0
-            };
-            let fw = w.checked_add(2 * px).ok_or(RenderError::Memory)?;
-            let fh = h.checked_add(2 * py).ok_or(RenderError::Memory)?;
+            // Only blur pixels needed by this output region, plus complete
+            // convolution support. The host's full input remains available for
+            // stable repeat-edge semantics and effects earlier in the stack.
+            let blur_rect = work_rect((w, h), output_size, origin, ch, settings.repeat);
+            let [left, top, right, bottom] = blur_rect;
+            let fw = (right - left).max(0) as usize;
+            let fh = (bottom - top).max(0) as usize;
             if blurred {
+                if fw == 0 || fh == 0 {
+                    continue;
+                }
                 let count = fw.checked_mul(fh).ok_or(RenderError::Memory)?;
                 field = zeros(count)?;
                 let mut scratch = zeros(count)?;
@@ -195,34 +295,35 @@ pub fn render(
                         return Err(RenderError::Cancelled);
                     }
                     for x in 0..fw {
-                        let p = source_pixel(
-                            src,
-                            x as i64 - px as i64,
-                            y as i64 - py as i64,
-                            settings.repeat,
-                        );
+                        let p = source_pixel(src, x as i64 + left, y as i64 + top, settings.repeat);
                         field[y * fw + x] = [p[c], p[3]];
                     }
                 }
                 for _ in 0..3 {
-                    box_pass(
-                        &field,
-                        &mut scratch,
-                        (fw, fh),
-                        ch.sigma[0],
-                        false,
-                        settings.repeat,
-                        &mut abort,
-                    )?;
-                    box_pass(
-                        &scratch,
-                        &mut field,
-                        (fw, fh),
-                        ch.sigma[1],
-                        true,
-                        settings.repeat,
-                        &mut abort,
-                    )?;
+                    if ch.sigma[0] > 0.0 {
+                        box_pass(
+                            &field,
+                            &mut scratch,
+                            (fw, fh),
+                            ch.sigma[0],
+                            false,
+                            settings.repeat,
+                            &mut abort,
+                        )?;
+                        std::mem::swap(&mut field, &mut scratch);
+                    }
+                    if ch.sigma[1] > 0.0 {
+                        box_pass(
+                            &field,
+                            &mut scratch,
+                            (fw, fh),
+                            ch.sigma[1],
+                            true,
+                            settings.repeat,
+                            &mut abort,
+                        )?;
+                        std::mem::swap(&mut field, &mut scratch);
+                    }
                 }
             }
             for y in 0..oh {
@@ -235,8 +336,8 @@ pub fn render(
                     let p = sample(sx, sy, |ix, iy| {
                         if blurred {
                             match (
-                                index(ix + px as i64, fw, settings.repeat),
-                                index(iy + py as i64, fh, settings.repeat),
+                                index(ix - left, fw, settings.repeat),
+                                index(iy - top, fh, settings.repeat),
                             ) {
                                 (Some(ix), Some(iy)) => field[iy * fw + ix],
                                 _ => [0.0; 2],
@@ -255,7 +356,7 @@ pub fn render(
             }
         }
     }
-    if settings.mix < 1.0 {
+    if settings.mix < 1.0 || settings.centre_restore > 0.0 {
         for y in 0..oh {
             if y % 32 == 0 && abort() {
                 return Err(RenderError::Cancelled);
@@ -264,9 +365,11 @@ pub fn render(
                 let base = sample(x as f32 + origin[0], y as f32 + origin[1], |ix, iy| {
                     source_pixel(src, ix, iy, false)
                 });
+                let protect =
+                    centre_weight(x as f32 + origin[0], y as f32 + origin[1], (w, h), settings);
+                let mix = settings.mix * (1.0 - protect);
                 for c in 0..4 {
-                    result[y * ow + x][c] =
-                        result[y * ow + x][c] * settings.mix + base[c] * (1.0 - settings.mix);
+                    result[y * ow + x][c] = result[y * ow + x][c] * mix + base[c] * (1.0 - mix);
                 }
             }
         }
@@ -294,6 +397,8 @@ mod tests {
             }),
             mix: 1.0,
             repeat: false,
+            centre_restore: 0.0,
+            reference_bounds: None,
         }
     }
     fn run(src: &Image, s: &Settings) -> Vec<Pixel> {
@@ -464,5 +569,123 @@ mod tests {
                 assert_eq!(roi[y * 2 + x], all[(y + 8) * 20 + x + 7]);
             }
         }
+    }
+    impl crate::reference_v21::Source for Image {
+        fn size(&self) -> (usize, usize) {
+            (self.0, self.1)
+        }
+        fn pixel(&self, x: usize, y: usize) -> Pixel {
+            self.2[y * self.0 + x]
+        }
+    }
+    #[test]
+    fn optimized_renderer_matches_v21_across_regions() {
+        use crate::reference_v21 as old;
+        let im = Image(
+            43,
+            37,
+            (0..43 * 37)
+                .map(|i| {
+                    let a = if i % 11 == 0 {
+                        0.0
+                    } else if i % 3 == 0 {
+                        0.25
+                    } else {
+                        1.0
+                    };
+                    [
+                        a * ((i * 71 % 113) as f32 / 40.0),
+                        a * ((i * 43 % 79) as f32 / 55.0),
+                        a * ((i * 17 % 97) as f32 / 80.0),
+                        a,
+                    ]
+                })
+                .collect(),
+        );
+        for repeat in [false, true] {
+            for mix in [0.0, 0.35, 1.0] {
+                for sigma in [[0.0, 0.0], [3.2, 0.0], [0.0, 2.7], [2.3, 0.6]] {
+                    let mut s = settings();
+                    s.repeat = repeat;
+                    s.mix = mix;
+                    for (i, c) in s.channels.iter_mut().enumerate() {
+                        c.sigma = sigma;
+                        c.offset = [(i as f32 - 1.0) * 3.7, 1.2 * i as f32];
+                        c.colour = [0.2, 0.8, 1.5];
+                    }
+                    let o = old::Settings {
+                        channels: s.channels.map(|c| old::Channel {
+                            offset: c.offset,
+                            colour: c.colour,
+                            sigma: c.sigma,
+                        }),
+                        mix,
+                        repeat,
+                    };
+                    for (size, origin) in [
+                        ((55, 49), [-6.0, -5.0]),
+                        ((9, 7), [4.0, 8.0]),
+                        ((5, 5), [-70.0, 90.0]),
+                        ((7, 9), [38.0, -8.0]),
+                    ] {
+                        let expected = old::render(&im, size, origin, &o, || false).unwrap();
+                        let actual = render(&im, size, origin, &s, || false).unwrap();
+                        for (a, b) in actual.iter().zip(expected) {
+                            for c in 0..4 {
+                                assert!(
+                                    (a[c] - b[c]).abs() < 0.00003,
+                                    "repeat={repeat} mix={mix} sigma={sigma:?} origin={origin:?}: {a:?} != {b:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn centre_restore_protects_middle_and_keeps_edges() {
+        let im = Image(101, 101, vec![[0.2, 0.5, 0.1, 1.0]; 101 * 101]);
+        let mut s = settings();
+        s.channels[1].colour = [0.0, 0.8, 0.7];
+        let aberrated = run(&im, &s);
+        s.centre_restore = 1.0;
+        let restored = run(&im, &s);
+        assert_eq!(restored[50 * 101 + 50], im.2[0]);
+        assert_eq!(restored[50 * 101], aberrated[50 * 101]);
+        let intermediate = restored[50 * 101 + 80];
+        assert!(intermediate[2] > im.2[0][2] && intermediate[2] < aberrated[0][2]);
+        s.centre_restore = 0.5;
+        let half = run(&im, &s);
+        near(half[50 * 101 + 50][2], (im.2[0][2] + aberrated[0][2]) * 0.5);
+    }
+    #[test]
+    fn centre_restore_is_stable_under_roi_and_upstream_expansion() {
+        let im = Image(151, 151, vec![[0.2, 0.4, 0.1, 0.5]; 151 * 151]);
+        let mut s = settings();
+        s.centre_restore = 1.0;
+        s.reference_bounds = Some([25.0, 25.0, 126.0, 126.0]);
+        s.channels[1].colour = [0.0, 0.8, 0.7];
+        let all = run(&im, &s);
+        let crop = render(&im, (9, 7), [71.0, 72.0], &s, || false).unwrap();
+        for y in 0..7 {
+            for x in 0..9 {
+                assert_eq!(crop[y * 9 + x], all[(y + 72) * 151 + x + 71]);
+            }
+        }
+        assert_eq!(all[75 * 151 + 75], im.2[0]);
+    }
+    #[test]
+    fn centre_restore_keeps_expanded_fringe_and_transparency() {
+        let im = Image(21, 21, vec![[0.1, 0.3, 0.2, 0.5]; 441]);
+        let mut s = settings();
+        s.channels[0].offset = [-5.0, 0.0];
+        s.channels[2].offset = [5.0, 0.0];
+        let original = render(&im, (35, 21), [-7.0, 0.0], &s, || false).unwrap();
+        s.centre_restore = 1.0;
+        let restored = render(&im, (35, 21), [-7.0, 0.0], &s, || false).unwrap();
+        assert_eq!(restored[10 * 35 + 3], original[10 * 35 + 3]);
+        assert_eq!(restored[10 * 35 + 17], im.2[0]);
+        assert_eq!(restored[0], [0.0; 4]);
     }
 }

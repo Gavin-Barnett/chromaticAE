@@ -1,8 +1,9 @@
-After Effects 26.5x89 | Chromatic AE native 2.1
+After Effects 26.5x89 | Chromatic AE native 2.2
 Split Amount (ChromaticAE RGB Split--527158438)
 Direction (ChromaticAE RGB Split-809198160)
 Edge Softness (ChromaticAE RGB Split-48502691)
 Blur Dimensions (ChromaticAE RGB Split-531877420)
+Centre Colour Restore (ChromaticAE RGB Split--1851876016)
 Mix (ChromaticAE RGB Split-1484701257)
 Repeat Edge Pixels (ChromaticAE RGB Split--262924777)
 Expand Layer Bounds (ChromaticAE RGB Split--1066524268)

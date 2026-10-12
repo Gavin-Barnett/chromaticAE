@@ -17,7 +17,7 @@ if (-not $AfterEffectsPath -or -not (Test-Path -LiteralPath (Join-Path $AfterEff
 $directory = Join-Path $AfterEffectsPath 'Support Files\Plug-ins\Chromatic AE'
 $destination = Join-Path $directory 'Chromatic AE.aex'
 if ((Test-Path -LiteralPath $destination) -and (Get-FileHash -LiteralPath $source).Hash -eq (Get-FileHash -LiteralPath $destination).Hash) {
-    Write-Host 'Chromatic AE 2.1 is already installed. Restart AE if it was open during installation.'
+    Write-Host 'Chromatic AE 2.2 is already installed. Restart AE if it was open during installation.'
     exit 0
 }
 try {

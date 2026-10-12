@@ -1,0 +1,7 @@
+1080p CPU kernel; one warm-up then median of five runs; alternating version order.
+Case | 2.1 ms | 2.2 ms | Speedup | 2.2 with restoration ms
+Integer split | 154.85 | 66.87 | 2.32x | 93.31
+Fractional split | 151.87 | 97.60 | 1.56x | 120.84
+Horizontal blur | 313.63 | 211.71 | 1.48x | 236.99
+Both-axis blur | 549.19 | 266.25 | 2.06x | 294.15
+Blur, 256x256 output region | 393.03 | 10.63 | 36.97x | 11.29

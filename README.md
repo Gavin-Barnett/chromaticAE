@@ -1,12 +1,12 @@
-# Chromatic AE 2.1
+# Chromatic AE 2.2
 
 A native Windows After Effects effect for RGB separation, channel recolouring and soft edges. Apply **one effect to an adjustment layer** to process all visible layers beneath it. It also works directly on footage, text, shapes and precomps.
 
-## New in 2.1
+## New in 2.2
 
-- **Blur Dimensions:** Horizontal and Vertical, Horizontal, or Vertical, like AE's blur effects.
-- Each channel has its own **Blur Dimensions** override; **Use Master** follows the shared menu. The chosen direction applies to that channel's combined master and individual softness.
-- **Expand Layer Bounds** is enabled by default. RGB offsets and blur tails can extend beyond the source layer on every side. Existing colours and keyframes are preserved when opening 2.0 projects.
+- **Centre Colour Restore:** blends the original image back into the middle, with a smooth elliptical transition to the aberrated edges. Fully keyframeable, from 0 to 100%.
+- Faster channel sampling and blur, with blur work limited to the pixels needed for the current output region. See `PERFORMANCE.md` for measured results and the benchmark method.
+- Existing colours, split distances, blur directions and keyframes are retained. Centre restoration defaults to 0%, preserving older projects' appearance.
 
 ## Install
 
@@ -40,6 +40,7 @@ Create **Layer > New > Adjustment Layer**, put it above the layers to process, a
 | Direction | Rotates the shared axis used by the three signed Distance controls. 0 degrees is horizontal; 90 degrees is vertical. |
 | Edge Softness | Softens all channel edges and details. Starts at zero. |
 | Blur Dimensions | Chooses Horizontal and Vertical, Horizontal, or Vertical for the shared softness direction. |
+| Centre Colour Restore | 0% keeps the full effect. 100% restores the original middle while retaining aberration around the outer edges. Intermediate values blend between them. |
 | Mix | Blends the processed result with the original image. 0% bypasses the treatment. |
 | Repeat Edge Pixels | Extends boundary pixels when offsets or blur sample outside the image. Disable for transparent boundaries and naturally fading blur tails. |
 | Expand Layer Bounds | Automatically grows the effect output to include the displaced channels and complete blur support. Enabled by default; disable to restore clipping to the input bounds. |
@@ -48,6 +49,8 @@ Create **Layer > New > Adjustment Layer**, put it above the layers to process, a
 | Red / Green / Blue Colour | Replaces the colour contributed by that channel while retaining its intensity. Set Green Colour to teal to remap the full green channel. |
 | Red / Green / Blue Softness | Adds softness to that channel only, on top of Edge Softness. |
 | Red / Green / Blue Blur Dimensions | Use Master, Horizontal and Vertical, Horizontal, or Vertical. Overrides the direction of all softness for that channel. |
+
+Start Centre Colour Restore around **75-100%** for a cleaner centre. The protected region follows the original layer centre and proportions; its inner area is fully restored at 100%, with a fixed smooth fade toward the outside. This restores original detail as well as colour, including detail softened by blur. On a composition-sized adjustment layer, it follows the composition centre.
 
 Colour contributions add together. Custom colours can create values above white in a 32-bit project. Softness is a Gaussian-like blur of channel detail and coverage, measured in source pixels; it is not a vignette or a blur restricted to the outside border of the composition. Large softness values and large frames take longer to render.
 
@@ -71,4 +74,4 @@ Install stable Rust with the MSVC target and Visual Studio C++ Build Tools with 
 
 The build uses pinned open-source `after-effects` bindings and `pipl` resource tooling, including upstream Windows resource and concurrency fixes. No Adobe SDK download is required for this build. `Cargo.lock` is committed. `native/build.ps1` runs the kernel tests, builds the release library and copies it to `plugin/Chromatic AE.aex`.
 
-`tests/native-suite.jsx` runs both the original regression checks and the new bounds/dimensions checks inside AE. See `VALIDATION.md` for tested behaviour and limitations. Dependency notices are in `THIRD-PARTY-NOTICES.txt`.
+`tests/native-suite.jsx` runs the original regression, centre restoration and bounds/dimensions checks inside AE. See `VALIDATION.md` for tested behaviour and limitations. Dependency notices are in `THIRD-PARTY-NOTICES.txt`.
