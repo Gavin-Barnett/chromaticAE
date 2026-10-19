@@ -1,0 +1,20 @@
+Chromatic AE v2.2.0 macOS Universal validation - 19 October 2026
+Package source: 7b3d0cbb39befa716f8fe32e1aa042ff65b52b05
+Build and architecture workflow: https://github.com/Gavin-Barnett/chromaticAE/actions/runs/39205096183
+Installer workflow: https://github.com/Gavin-Barnett/chromaticAE/actions/runs/39205428496
+
+PASS unchanged v2.2 rendering engine, AE adapter, Cargo manifests and released Windows binary
+PASS Apple Silicon: 20 kernel tests, 0 failures
+PASS Apple Silicon: all 32 control IDs and order match the Windows AE v2.2 report
+PASS Apple Silicon: universal bundle signature, PiPL and actual library registration
+PASS Intel: 20 kernel tests, 0 failures
+PASS Intel: all 32 control IDs and order match the Windows AE v2.2 report
+PASS Intel: same packaged universal bundle signature, PiPL and actual library registration
+PASS fresh Mac installation and installed bundle loading
+PASS second Mac installation preserves the previous bundle in the backup folder
+PASS ZIP integrity, per-file checksums and executable installer permissions
+
+Mac ZIP SHA256: f2d5b67518a8cb44330d077a993ea3e43141674ae9597f193a0cb2cb441c9d83
+Windows AEX SHA256 unchanged: ae8aac580cc89a8453320e88357389cbdcf978ed984f0c81e4c1fbbeb6c382b7
+
+LIMIT: ad-hoc signed, not Apple-notarized. No AE installation was available on the Mac runners; actual AE-host rendering and opening existing projects on Mac are not yet verified. The optional host test scripts are included in the package.

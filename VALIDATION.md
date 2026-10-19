@@ -43,3 +43,23 @@ In headless AE 2026, expression pixel probes returned stale empty values after `
 4. Run `tests/bounds-resolution.jsx` and `tests/centre-resolution.jsx` in fresh AE processes after the suite. Render their saved `test-output/bounds-resolution.aep` and `test-output/centre-resolution.aep` with aerender, then run `tests/check-bounds-renders.py` and `tests/check-centre-renders.py` using Python and Pillow.
 
 The 2.0 demo fixture is stored under `tests/fixtures/`. The original ScriptUI version and its separate evidence are preserved under `legacy/`.
+
+## macOS universal build (19 October 2026)
+
+The Mac package is v2.2.0 with unchanged rendering code, controls, defaults and effect match name. `tests/verify-v22-source.py` checks the engine, AE adapter, dependency manifests and released Windows binary against their original v2.2 hashes. The Mac build changes only platform registration and packaging.
+
+- Apple Silicon: all 20 rendering tests pass, and the actual parameter-setup callback produces the same 32 control IDs in the same order as the recorded Windows AE report.
+- Intel: all 20 rendering tests pass, with the same 32 Windows control IDs and order.
+- The packaged Mach-O contains both arm64 and x86_64 architectures. Code-signature verification, PiPL checks and dynamic loading/registration pass on both Apple Silicon and Intel.
+- The packaged installer passes a fresh installation and a second installation on a clean Mac runner, including the backup of the existing bundle outside Adobe's plugin folders. The installed plugin passes the same signature and loading checks.
+- The downloaded ZIP passes integrity, executable permission and per-file SHA-256 checks.
+
+This is an ad-hoc signed build, not Apple-notarized. AE itself is not installed on the Mac runners, so Mac AE-host rendering and opening an existing project on Mac remain unverified. The optional AE-host suite is included in the Mac ZIP; see `MAC-INSTALL.md`.
+
+Mac package source: `7b3d0cbb39befa716f8fe32e1aa042ff65b52b05`.
+
+- [Mac build and architecture checks](https://github.com/Gavin-Barnett/chromaticAE/actions/runs/39205096183)
+- [Mac installer and upgrade checks](https://github.com/Gavin-Barnett/chromaticAE/actions/runs/39205428496)
+
+Mac ZIP SHA-256: `f2d5b67518a8cb44330d077a993ea3e43141674ae9597f193a0cb2cb441c9d83`.
+Windows `.aex` SHA-256 remains `ae8aac580cc89a8453320e88357389cbdcf978ed984f0c81e4c1fbbeb6c382b7`.

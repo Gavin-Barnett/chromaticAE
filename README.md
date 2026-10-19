@@ -1,6 +1,6 @@
 # Chromatic AE 2.2
 
-A native After Effects effect for Windows and macOS for RGB separation, channel recolouring and soft edges. Apply **one effect to an adjustment layer** to process all visible layers beneath it. It also works directly on footage, text, shapes and precomps.
+A native After Effects effect for RGB separation, channel recolouring and soft edges on Windows and macOS. Apply **one effect to an adjustment layer** to process all visible layers beneath it. It also works directly on footage, text, shapes and precomps.
 
 ## New in 2.2
 
