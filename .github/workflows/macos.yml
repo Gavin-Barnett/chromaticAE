@@ -1,0 +1,53 @@
+name: Mac universal build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install matching Rust toolchain
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Verify unchanged Windows-compatible source
+        run: python3 tests/verify-v22-source.py
+      - name: Build, test and package both Mac architectures
+        run: bash native/build-macos.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Chromatic-AE-2.2.0-macOS-Universal
+          path: |
+            dist/Chromatic-AE-2.2.0-macOS-Universal.zip
+            dist/mac-build-report.txt
+          if-no-files-found: error
+  intel-check:
+    needs: build
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Chromatic-AE-2.2.0-macOS-Universal
+          path: dist
+      - name: Install matching Rust toolchain
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+      - name: Test on Intel and load packaged universal plugin
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+        run: |
+          cargo test --locked --manifest-path native/Cargo.toml
+          cargo run --locked --release --manifest-path native/Cargo.toml --example project_compatibility
+          ditto -x -k dist/Chromatic-AE-2.2.0-macOS-Universal.zip dist/intel-check
+          python3 tests/check-macos-bundle.py 'dist/intel-check/Chromatic-AE-2.2.0-macOS-Universal/plugin/Chromatic AE.plugin'

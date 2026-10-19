@@ -1,6 +1,6 @@
 # Chromatic AE 2.2
 
-A native Windows After Effects effect for RGB separation, channel recolouring and soft edges. Apply **one effect to an adjustment layer** to process all visible layers beneath it. It also works directly on footage, text, shapes and precomps.
+A native After Effects effect for Windows and macOS for RGB separation, channel recolouring and soft edges. Apply **one effect to an adjustment layer** to process all visible layers beneath it. It also works directly on footage, text, shapes and precomps.
 
 ## New in 2.2
 
@@ -9,6 +9,10 @@ A native Windows After Effects effect for RGB separation, channel recolouring an
 - Existing colours, split distances, blur directions and keyframes are retained. Centre restoration defaults to 0%, preserving older projects' appearance.
 
 ## Install
+
+Choose the **Windows x64** or **macOS Universal** ZIP from the v2.2.0 release. The Mac build supports both Apple Silicon and Intel and keeps the Windows effect's rendering and saved controls unchanged. See [MAC-INSTALL.md](MAC-INSTALL.md) for Mac installation and signing details.
+
+### Windows
 
 1. Download the release ZIP and **extract all of it**.
 2. Close After Effects, then double-click **Install Chromatic AE.cmd**. Accept the Windows administrator prompt if it appears.
@@ -28,7 +32,7 @@ C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Plug-ins\Chromatic
 
 Create the final folder if needed, and restart AE. This is a native effect; the Window menu and ScriptUI Panels folder are for the legacy version.
 
-**Another machine:** transfer the complete release ZIP, extract it, and run the same installer. No Rust, Adobe SDK, account, activation or ScriptUI panel is needed. Install the `.aex` on every machine that will render a project using it. This build is for Windows x64; it does not run on macOS or Windows ARM natively.
+**Another machine:** transfer the complete release ZIP, extract it, and run the same installer. No Rust, Adobe SDK, account, activation or ScriptUI panel is needed. Install the `.aex` on every machine that will render a project using it. The Windows ZIP is for Windows x64. Use the macOS Universal ZIP on a Mac; Windows ARM is not supported natively.
 
 ## Use
 
@@ -66,11 +70,13 @@ Open `examples\Chromatic AE Native Demo.aep`, or choose **File > Scripts > Run S
 
 ## Build from source
 
-Install stable Rust with the MSVC target and Visual Studio C++ Build Tools with the Windows SDK. Run:
+For Windows, install stable Rust with the MSVC target and Visual Studio C++ Build Tools with the Windows SDK. Run:
 
 ```powershell
 .\native\build.ps1
 ```
+
+For the Mac universal package, run `bash native/build-macos.sh` on macOS with Xcode Command Line Tools and Rust 1.99.0. This leaves the Windows binary unchanged.
 
 The build uses pinned open-source `after-effects` bindings and `pipl` resource tooling, including upstream Windows resource and concurrency fixes. No Adobe SDK download is required for this build. `Cargo.lock` is committed. `native/build.ps1` runs the kernel tests, builds the release library and copies it to `plugin/Chromatic AE.aex`.
 

@@ -5,7 +5,12 @@ fn main() {
         Property::Kind(PIPLType::AEEffect),
         Property::Name("Chromatic AE"),
         Property::Category("Chromatic"),
+        #[cfg(target_os = "windows")]
         Property::CodeWin64X86("EffectMain"),
+        #[cfg(target_os = "macos")]
+        Property::CodeMacIntel64("EffectMain"),
+        #[cfg(target_os = "macos")]
+        Property::CodeMacARM64("EffectMain"),
         Property::AE_PiPL_Version { major: 2, minor: 0 },
         Property::AE_Effect_Spec_Version {
             major: 13,
