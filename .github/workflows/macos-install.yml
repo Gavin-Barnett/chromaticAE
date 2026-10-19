@@ -1,0 +1,38 @@
+name: Mac installer check
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful Mac build run ID from this repository
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  install:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download built release package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.build_run }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          gh run download "$SOURCE_RUN" --name Chromatic-AE-2.2.0-macOS-Universal --dir dist
+          ditto -x -k dist/Chromatic-AE-2.2.0-macOS-Universal.zip dist/installer-check
+      - name: Check clean installation and upgrade backup
+        run: |
+          package='dist/installer-check/Chromatic-AE-2.2.0-macOS-Universal'
+          destination='/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/Chromatic AE.plugin'
+          bash "$package/Install Chromatic AE.command"
+          python3 tests/check-macos-bundle.py "$destination"
+          bash "$package/Install Chromatic AE.command"
+          python3 tests/check-macos-bundle.py "$destination"
+          backup_count=$(find '/Library/Application Support/Chromatic AE/Backups' -name 'Chromatic AE.plugin' -type d | wc -l | tr -d ' ')
+          [[ "$backup_count" -ge 1 ]]
+          echo 'PASS installer, installed plugin loading and upgrade backup'
